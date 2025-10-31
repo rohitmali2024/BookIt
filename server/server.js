@@ -14,13 +14,12 @@ const app = express()
 // Middleware
 // app.use(cors())
 
-const allowedOrigins = [
-  process.env.ALLOWED_ORIGIN || "http://localhost:3000",
-];
+
+// https://bookit-1-042u.onrender.com
 
 app.use(
   cors({
-    origin: allowedOrigins,
+    origin: ["https://bookit-1-042u.onrender.com"],
     credentials: true,
   })
 );
