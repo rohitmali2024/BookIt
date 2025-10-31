@@ -12,12 +12,23 @@ dotenv.config()
 const app = express()
 
 // Middleware
-app.use(cors())
+// app.use(cors())
+
+const allowedOrigins = [
+  process.env.ALLOWED_ORIGIN || "http://localhost:3000",
+];
+
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+  })
+);
 app.use(express.json())
 
 // MongoDB Connection
 mongoose
-  .connect(process.env.MONGODB_URI || "mongodb://localhost:27017/bookit")
+  .connect(process.env.MONGODB_URI)
   .then(() => console.log("MongoDB connected"))
   .catch((err) => console.log("MongoDB connection error:", err))
 
