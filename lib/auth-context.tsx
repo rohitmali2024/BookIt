@@ -5,7 +5,7 @@ import { createContext, useContext, useState, useEffect } from "react"
 import { authAPI } from "./api"
 
 interface User {
-  id: string
+  _id: string
   name: string
   email: string
 }

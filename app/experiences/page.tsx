@@ -60,59 +60,47 @@ export default function ExperiencesPage() {
   return (
     <>
       <Navbar />
-      <main className="bg-background min-h-screen py-12 px-4">
+      <main className="bg-[#f9f9f9] min-h-screen py-12 px-4">
         <div className="max-w-7xl mx-auto">
-          <h1 className="text-4xl font-bold mb-2">Explore Experiences</h1>
-          <p className="text-muted-foreground mb-12">Choose from our amazing collection of travel experiences</p>
+          <h1 className="text-4xl font-bold mb-2 text-gray-900">Explore Experiences</h1>
+          <p className="text-gray-500 mb-12">
+            Choose from our amazing collection of travel experiences
+          </p>
 
-          {error && <div className="bg-error/10 text-error p-4 rounded-lg mb-8">{error}</div>}
+          {error && <div className="bg-red-100 text-red-600 p-4 rounded-lg mb-8">{error}</div>}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
             {experiences.map((experience) => (
               <Link key={experience._id} href={`/experiences/${experience._id}`}>
-                <div className="bg-card rounded-lg overflow-hidden shadow-md hover:shadow-xl transition-all hover:scale-105 cursor-pointer h-full">
-                  <div className="relative h-64 bg-muted overflow-hidden">
+                <div className="bg-white rounded-xl overflow-hidden shadow hover:shadow-lg transition-all duration-200 cursor-pointer">
+                  <div className="h-48 w-full overflow-hidden">
                     <img
                       src={experience.image || "/placeholder.svg"}
                       alt={experience.title}
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
                     />
-                    <div className="absolute top-4 right-4 bg-primary text-white px-3 py-1 rounded-full text-sm font-semibold">
-                      ${experience.price}
-                    </div>
                   </div>
 
-                  <div className="p-6">
-                    <h3 className="text-xl font-bold mb-2">{experience.title}</h3>
-                    <p className="text-muted-foreground text-sm mb-4">{experience.description}</p>
-
-                    <div className="flex items-center gap-2 mb-4">
-                      <span className="text-yellow-500">★</span>
-                      <span className="font-semibold">{experience.rating}</span>
-                      <span className="text-muted-foreground text-sm">({experience.reviews} reviews)</span>
+                  <div className="p-4">
+                    <div className="flex justify-between items-center mb-1">
+                      <h3 className="text-lg font-semibold text-gray-900 truncate">{experience.title}</h3>
+                      <span className="bg-gray-100 text-gray-700 text-xs px-2 py-1 rounded-md">
+                        {experience.location}
+                      </span>
                     </div>
 
-                    <div className="flex items-center gap-2 text-muted-foreground text-sm mb-4">
-                      <span>📍</span>
-                      <span>{experience.location}</span>
-                    </div>
+                    <p className="text-gray-500 text-sm mb-3 leading-snug">
+                      Curated small-group experience. Certified guide. Safety first with gear included.
+                    </p>
 
-                    <div className="flex flex-wrap gap-2">
-                      {experience.amenities.slice(0, 3).map((amenity, idx) => (
-                        <span key={idx} className="bg-muted text-foreground text-xs px-2 py-1 rounded">
-                          {amenity}
-                        </span>
-                      ))}
-                      {experience.amenities.length > 3 && (
-                        <span className="bg-muted text-foreground text-xs px-2 py-1 rounded">
-                          +{experience.amenities.length - 3} more
-                        </span>
-                      )}
+                    <div className="flex justify-between items-center">
+                      <p className="text-gray-900 font-semibold text-base">
+                        From <span className="font-bold text-black">₹{experience.price}</span>
+                      </p>
+                      <button className="bg-[#FFD43B] cursor-pointer hover:bg-[#f5c518] text-black font-semibold text-sm px-4 py-2 rounded-md transition-colors">
+                        View Details
+                      </button>
                     </div>
-
-                    <button className="w-full mt-6 bg-primary hover:bg-primary-dark text-white font-semibold py-2 rounded-lg transition-colors">
-                      View Details
-                    </button>
                   </div>
                 </div>
               </Link>
@@ -123,3 +111,4 @@ export default function ExperiencesPage() {
     </>
   )
 }
+

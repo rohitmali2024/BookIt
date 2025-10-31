@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useEffect, useState } from "react"
 import { useRouter, useParams, useSearchParams } from "next/navigation"
 import Navbar from "@/components/navbar"
@@ -17,29 +16,41 @@ interface Experience {
 }
 
 export default function CheckoutPage() {
+  const router = useRouter()
+  const params = useParams()
+  const searchParams = useSearchParams()
+  const id = params.id as string
+
+  // read price-related values from query (passed from experience page)
+  const guestsParam = Number(searchParams.get("guests") || "1")
+  const unitPriceParam = searchParams.get("unitPrice")
+  const subtotalParam = searchParams.get("subtotal")
+  const taxesParam = searchParams.get("taxes")
+  const totalParam = searchParams.get("total")
+
   const [experience, setExperience] = useState<Experience | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [bookingLoading, setBookingLoading] = useState(false)
 
-  // Form state
-  const [firstName, setFirstName] = useState("")
-  const [lastName, setLastName] = useState("")
+  const [fullName, setFullName] = useState("")
   const [email, setEmail] = useState("")
-  const [phone, setPhone] = useState("")
-  const [guests, setGuests] = useState(1)
   const [promoCode, setPromoCode] = useState("")
   const [promoError, setPromoError] = useState("")
   const [discount, setDiscount] = useState(0)
-  const [discountType, setDiscountType] = useState("")
 
   const { isAuthenticated, user } = useAuth()
-  const router = useRouter()
-  const params = useParams()
-  const searchParams = useSearchParams()
-  const id = params.id as string
-  const date = searchParams.get("date")
-  const time = searchParams.get("time")
+
+  // Use states for qty and all pricing values — prefer query params if provided
+  const [qty, setQty] = useState<number>(guestsParam)
+  const [unitPrice, setUnitPrice] = useState<number | null>(
+    unitPriceParam ? Number(unitPriceParam) : null,
+  )
+  const [subtotal, setSubtotal] = useState<number | null>(
+    subtotalParam ? Number(subtotalParam) : null,
+  )
+  const [taxes, setTaxes] = useState<number>(taxesParam ? Number(taxesParam) : 59)
+  const [total, setTotal] = useState<number | null>(totalParam ? Number(totalParam) : null)
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -49,14 +60,26 @@ export default function CheckoutPage() {
 
     if (user) {
       setEmail(user.email)
-      setFirstName(user.name.split(" ")[0])
-      setLastName(user.name.split(" ").slice(1).join(" ") || "")
+      setFullName(user.name)
     }
 
     const fetchExperience = async () => {
       try {
         const response = await experienceAPI.getById(id)
-        setExperience(response.data)
+        const exp = response.data
+        setExperience(exp)
+
+        // If price values not supplied via query, compute and set them now
+        if (unitPrice === null) {
+          setUnitPrice(exp.price)
+        }
+        if (subtotal === null) {
+          setSubtotal(exp.price * qty)
+        }
+        if (total === null) {
+          const computedTaxes = taxes ?? 59
+          setTotal((subtotal ?? exp.price * qty) - discount + computedTaxes)
+        }
       } catch (err: any) {
         setError(err.response?.data?.message || "Failed to fetch experience")
       } finally {
@@ -65,10 +88,20 @@ export default function CheckoutPage() {
     }
 
     fetchExperience()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isAuthenticated, router, user])
 
-  const subtotal = experience ? experience.price * guests : 0
-  const finalPrice = Math.max(0, subtotal - discount)
+  // Recompute totals when qty, discount or unitPrice change (but keep query-provided values unless missing)
+  useEffect(() => {
+    // if unitPrice missing but experience is available, derive it
+    const pricePerGuest = unitPrice ?? experience?.price ?? 0
+    const newSubtotal = pricePerGuest * qty
+    setSubtotal(newSubtotal)
+
+    const appliedTaxes = taxes ?? 59
+    setTotal(newSubtotal - discount + appliedTaxes)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qty, unitPrice, discount, experience])
 
   const handleApplyPromo = async () => {
     if (!promoCode.trim()) {
@@ -78,60 +111,64 @@ export default function CheckoutPage() {
 
     try {
       setPromoError("")
-      const response = await promoAPI.validate(promoCode, subtotal)
+      // validate against the displayed subtotal (prefer state)
+      const amountToValidate = subtotal ?? (unitPrice ?? experience?.price ?? 0) * qty
+      const response = await promoAPI.validate(promoCode, amountToValidate)
       setDiscount(response.data.discount)
-      setDiscountType(response.data.discountType)
     } catch (err: any) {
       setPromoError(err.response?.data?.message || "Invalid promo code")
       setDiscount(0)
-      setDiscountType("")
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError("")
-    setBookingLoading(true)
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setBookingLoading(true);
+  setError("");
 
-    try {
-      if (!firstName || !lastName || !email || !phone || !guests) {
-        throw new Error("All fields are required")
-      }
+  try {
+    const bookingData = {
+      userId: user?._id,
+      experienceId: id,
+      fullName,
+      email,
+      date: searchParams.get("date"),
+      time: searchParams.get("time"),
+      guests: qty,
+      totalPrice: total ?? (subtotal ?? 0) - discount + taxes,
+      promoCode: promoCode || undefined,
+      discount: discount || 0,
+    };
 
-      if (!date || !time) {
-        throw new Error("Date and time are required")
-      }
+    console.log("Sending booking data:", bookingData);
 
-      const bookingData = {
-        experienceId: id,
-        firstName,
-        lastName,
-        email,
-        phone,
-        date,
-        time,
-        guests: Number.parseInt(guests.toString()),
-        totalPrice: finalPrice,
-        promoCode: promoCode || undefined,
-        discount,
-      }
+    const response = await bookingAPI.create(bookingData);
 
-      const response = await bookingAPI.create(bookingData)
-
-      router.push(`/booking-result/${response.data.booking._id}?status=success`)
-    } catch (err: any) {
-      setError(err.message || err.response?.data?.message || "Booking failed")
-    } finally {
-      setBookingLoading(false)
+    if (response.data?.booking?._id) {
+      router.push(`/booking-result/${response.data.booking._id}?status=success`);
+    } else {
+      throw new Error("Invalid booking response");
     }
+  } catch (err: any) {
+    console.error("Booking error:", err);
+    if (err.response?.status === 400) {
+      setError(err.response.data.message || "Invalid booking request");
+    } else if (err.response?.status === 401) {
+      router.push("/login");
+    } else {
+      setError(err.message || "Booking failed");
+    }
+  } finally {
+    setBookingLoading(false);
   }
+};
 
   if (loading) {
     return (
       <>
         <Navbar />
         <div className="min-h-screen flex items-center justify-center">
-          <p className="text-lg text-muted-foreground">Loading checkout...</p>
+          <p className="text-lg text-gray-500">Loading checkout...</p>
         </div>
       </>
     )
@@ -142,201 +179,165 @@ export default function CheckoutPage() {
       <>
         <Navbar />
         <div className="min-h-screen flex items-center justify-center">
-          <p className="text-lg text-error">{error || "Experience not found"}</p>
+          <p className="text-lg text-red-500">{error || "Experience not found"}</p>
         </div>
       </>
     )
   }
 
+  const rawDate = searchParams.get("date")
+  const formattedDate = rawDate ? new Date(rawDate).toISOString().split("T")[0] : "-"
+
   return (
     <>
       <Navbar />
-      <main className="bg-background min-h-screen py-12 px-4">
-        <div className="max-w-7xl mx-auto">
-          <Link href={`/experiences/${id}`} className="text-primary hover:text-primary-dark mb-6 inline-block">
-            ← Back to Experience
+      <main className="min-h-screen bg-white px-6 py-8 md:px-12">
+        <div className="max-w-6xl mx-auto">
+          <Link
+            href={`/experiences/${id}`}
+            className="inline-flex items-center text-black text-[15px] font-medium mb-6 hover:opacity-70"
+          >
+            ← Checkout
           </Link>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Left Column - Checkout Form */}
-            <div className="lg:col-span-2">
-              <div className="bg-card rounded-lg shadow-md p-8">
-                <h1 className="text-3xl font-bold mb-8">Complete Your Booking</h1>
+          <div className="flex flex-col lg:flex-row gap-8">
 
-                {error && <div className="bg-error/10 text-error p-4 rounded-lg mb-6">{error}</div>}
-
-                <form onSubmit={handleSubmit} className="space-y-8">
-                  {/* Personal Information */}
+            {/* Left section */}
+            <div className="flex-1 bg-[#f7f7f7] rounded-xl p-8 space-y-6">
+              <form id="booking-form" onSubmit={handleSubmit} className="space-y-6">
+                <div className="flex gap-3 mt-2">
                   <div>
-                    <h2 className="text-xl font-bold mb-4">Personal Information</h2>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium mb-2">First Name</label>
-                        <input
-                          type="text"
-                          value={firstName}
-                          onChange={(e) => setFirstName(e.target.value)}
-                          required
-                          placeholder="John"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Last Name</label>
-                        <input
-                          type="text"
-                          value={lastName}
-                          onChange={(e) => setLastName(e.target.value)}
-                          required
-                          placeholder="Doe"
-                        />
-                      </div>
-                    </div>
+                    <label className="text-sm font-medium text-gray-700">Full name</label>
+                    <input
+                      type="text"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      className="w-full mt-2 px-4 py-3 rounded-md bg-[#e6e6e6] focus:outline-none text-gray-900 font-medium"
+                      placeholder="John Doe"
+                      required
+                    />
                   </div>
 
-                  {/* Contact Information */}
                   <div>
-                    <h2 className="text-xl font-bold mb-4">Contact Information</h2>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Email</label>
-                        <input
-                          type="email"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          required
-                          placeholder="john@example.com"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Phone Number</label>
-                        <input
-                          type="tel"
-                          value={phone}
-                          onChange={(e) => setPhone(e.target.value)}
-                          required
-                          placeholder="+1 (555) 000-0000"
-                        />
-                      </div>
-                    </div>
+                    <label className="text-sm font-medium text-gray-700">Email</label>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full mt-2 px-4 py-3 rounded-md bg-[#e6e6e6] focus:outline-none text-gray-900 font-medium"
+                      placeholder="test@test.com"
+                      required
+                    />
                   </div>
+                </div>
 
-                  {/* Booking Details */}
-                  <div>
-                    <h2 className="text-xl font-bold mb-4">Booking Details</h2>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Number of Guests</label>
-                      <select
-                        value={guests}
-                        onChange={(e) => setGuests(Number.parseInt(e.target.value))}
-                        className="w-full"
-                      >
-                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
-                          <option key={num} value={num}>
-                            {num} {num === 1 ? "Guest" : "Guests"}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                <div>
+                  <div className="flex gap-3 mt-2">
+                    <input
+                      type="text"
+                      value={promoCode}
+                      onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+                      className="flex-1 px-4 py-3 rounded-md bg-[#e6e6e6] focus:outline-none text-gray-900 font-medium"
+                      placeholder="Promo code"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleApplyPromo}
+                      className="bg-black text-white font-medium px-5 py-3 rounded-md hover:bg-gray-800"
+                    >
+                      Apply
+                    </button>
                   </div>
+                  {promoError && <p className="text-red-500 text-sm mt-1">{promoError}</p>}
+                </div>
 
-                  {/* Promo Code */}
-                  <div>
-                    <h2 className="text-xl font-bold mb-4">Promo Code</h2>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={promoCode}
-                        onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
-                        placeholder="Enter promo code (e.g., SAVE10)"
-                        className="flex-1"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleApplyPromo}
-                        className="bg-secondary hover:bg-secondary/80 text-foreground font-semibold px-6 py-2 rounded-lg transition-colors"
-                      >
-                        Apply
-                      </button>
-                    </div>
-                    {promoError && <p className="text-error text-sm mt-2">{promoError}</p>}
-                    {discount > 0 && (
-                      <p className="text-success text-sm mt-2">✓ Promo applied! You saved ${discount.toFixed(2)}</p>
-                    )}
-                  </div>
+                <div className="flex items-center space-x-2">
+                  <input type="checkbox" id="terms" required className="accent-black w-4 h-4" />
+                  <label htmlFor="terms" className="text-sm text-gray-700">
+                    I agree to the terms and safety policy
+                  </label>
+                </div>
+              </form>
+            </div>
 
+            {/* Right section */}
+            <div className="lg:w-[420px] bg-[#f7f7f7] rounded-xl p-8 space-y-5">
+              <div className="flex justify-between">
+                <span className="text-gray-700 font-medium">Experience</span>
+                <span className="text-gray-800 font-semibold">{experience.title}</span>
+              </div>
+
+              <div className="flex justify-between text-gray-700 text-sm">
+                <span>Date</span>
+
+                <span>{formattedDate}</span>
+              </div>
+              <div className="flex justify-between text-gray-700 text-sm">
+                <span>Time</span>
+                <span>{searchParams.get("time") || "-"}</span>
+              </div>
+
+              <div className="flex justify-between text-gray-700 text-sm">
+                <span>Qty</span>
+                <div className="flex items-center gap-3">
                   <button
-                    type="submit"
-                    disabled={bookingLoading}
-                    className="w-full bg-primary hover:bg-primary-dark disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors"
+                    onClick={() => setQty((q) => Math.max(1, q - 1))}
+                    className="text-lg px-2 border rounded"
+                    aria-label="decrease quantity"
                   >
-                    {bookingLoading ? "Processing..." : "Complete Booking"}
+                    −
                   </button>
-                </form>
+                  <span>{qty}</span>
+                  <button
+                    onClick={() => {
+                      // cap at availability if possible
+                      setQty((q) => q + 1)
+                    }}
+                    className="text-lg px-2 border rounded"
+                    aria-label="increase quantity"
+                  >
+                    +
+                  </button>
+                </div>
               </div>
+
+              <div className="flex justify-between text-gray-700 text-sm pt-2">
+                <span>Price per guest</span>
+                <span>₹{unitPrice ?? experience.price}</span>
+              </div>
+
+              <div className="flex justify-between text-gray-700 text-sm pt-2">
+                <span>Subtotal</span>
+                <span>₹{subtotal ?? 0}</span>
+              </div>
+
+              <div className="flex justify-between text-gray-700 text-sm">
+                <span>Taxes</span>
+                <span>₹{taxes}</span>
+              </div>
+
+              <hr className="border-gray-300 my-2" />
+
+              <div className="flex justify-between items-center">
+                <span className="text-lg font-semibold text-black">Total</span>
+                <span className="text-2xl font-semibold text-black">₹{total ?? 0}</span>
+              </div>
+
+              <button
+                type="submit"
+                form="booking-form"
+               
+                disabled={bookingLoading}
+                className="w-full cursor-pointer bg-[#ffd54f] hover:bg-[#ffca28] text-black font-semibold py-4 rounded-md text-lg mt-4"
+              >
+                {bookingLoading ? "Processing..." : "Pay and Confirm"}
+              </button>
             </div>
 
-            {/* Right Column - Order Summary */}
-            <div className="lg:col-span-1">
-              <div className="bg-card rounded-lg shadow-md p-8 sticky top-8">
-                <h3 className="text-2xl font-bold mb-6">Order Summary</h3>
-
-                <div className="space-y-4 mb-6 pb-6 border-b border-border">
-                  <div>
-                    <p className="font-semibold text-lg">{experience.title}</p>
-                    <p className="text-muted-foreground text-sm">{experience.location}</p>
-                  </div>
-
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Date</span>
-                      <span>
-                        {date
-                          ? new Date(date).toLocaleDateString("en-US", {
-                              month: "short",
-                              day: "numeric",
-                              year: "numeric",
-                            })
-                          : "-"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Time</span>
-                      <span>{time || "-"}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Guests</span>
-                      <span>{guests}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3 mb-6 pb-6 border-b border-border">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Subtotal</span>
-                    <span className="font-semibold">${subtotal.toFixed(2)}</span>
-                  </div>
-
-                  {discount > 0 && (
-                    <div className="flex justify-between text-success">
-                      <span className="text-muted-foreground">Discount</span>
-                      <span className="font-semibold">-${discount.toFixed(2)}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex justify-between items-center mb-6">
-                  <span className="text-lg font-bold">Total</span>
-                  <span className="text-2xl font-bold text-primary">${finalPrice.toFixed(2)}</span>
-                </div>
-
-                <p className="text-center text-sm text-muted-foreground">
-                  You won't be charged until you complete the booking
-                </p>
-              </div>
-            </div>
           </div>
         </div>
       </main>
     </>
   )
 }
+
